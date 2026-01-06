@@ -11,12 +11,39 @@ import os
 
 # Auto-install missing dependencies
 def install_package(package):
-    """Install a package using pip"""
-    try:
-        subprocess.check_call([sys.executable, "-m", "pip", "install", package, "--quiet"])
-        return True
-    except subprocess.CalledProcessError:
-        return False
+    """Install a package using pip with detailed error reporting"""
+    methods = [
+        # Method 1: Use sys.executable with -m pip
+        [sys.executable, "-m", "pip", "install", package, "--user"],
+        # Method 2: Try without --user flag
+        [sys.executable, "-m", "pip", "install", package],
+        # Method 3: Try with --upgrade
+        [sys.executable, "-m", "pip", "install", "--upgrade", package],
+    ]
+    
+    last_error = None
+    
+    for method in methods:
+        try:
+            result = subprocess.run(
+                method,
+                capture_output=True,
+                text=True,
+                timeout=120,
+                check=False
+            )
+            
+            if result.returncode == 0:
+                return True, None
+            else:
+                error_msg = result.stderr if result.stderr else result.stdout
+                last_error = error_msg
+        except subprocess.TimeoutExpired:
+            last_error = "Installation timed out after 120 seconds"
+        except Exception as e:
+            last_error = f"Error: {str(e)}"
+    
+    return False, last_error or "Unknown error occurred"
 
 def check_and_install_dependencies():
     """Check for required dependencies and install if missing"""
@@ -32,18 +59,86 @@ def check_and_install_dependencies():
         try:
             __import__(package)
         except ImportError:
-            missing_packages.append(install_name)
+            missing_packages.append((package, install_name))
     
     if missing_packages:
-        with st.spinner(f"Installing missing dependencies: {', '.join([p.split('>=')[0] for p in missing_packages])}..."):
-            for package in missing_packages:
-                package_name = package.split('>=')[0]
-                if install_package(package):
-                    st.success(f"✅ Installed {package_name}")
-                else:
-                    st.error(f"❌ Failed to install {package_name}")
-                    st.stop()
-        st.rerun()
+        package_names = [p[0] for p in missing_packages]
+        st.warning(f"⚠️ Missing dependencies detected: {', '.join(package_names)}")
+        st.info("Attempting to install automatically...")
+        
+        install_status = {}
+        error_messages = {}
+        
+        for package, install_name in missing_packages:
+            status_placeholder = st.empty()
+            status_placeholder.info(f"Installing {package}...")
+            
+            success, error = install_package(install_name)
+            
+            if success:
+                status_placeholder.success(f"✅ Successfully installed {package}")
+                install_status[package] = True
+            else:
+                status_placeholder.error(f"❌ Failed to install {package}")
+                error_messages[package] = error
+                install_status[package] = False
+        
+        # Check if all installations succeeded
+        if all(install_status.values()):
+            st.success("✅ All dependencies installed successfully! Refreshing...")
+            st.balloons()
+            import time
+            time.sleep(2)
+            st.rerun()
+        else:
+            # Show detailed error and manual installation instructions
+            st.error("❌ Some dependencies failed to install automatically")
+            
+            failed_packages = [pkg for pkg, status in install_status.items() if not status]
+            
+            with st.expander("🔍 Error Details", expanded=True):
+                for pkg in failed_packages:
+                    st.error(f"**{pkg}** installation failed:")
+                    if pkg in error_messages and error_messages[pkg]:
+                        error_text = error_messages[pkg]
+                        # Show first 500 chars of error
+                        if len(error_text) > 500:
+                            st.code(error_text[:500] + "\n... (truncated)", language='text')
+                            with st.expander("Show full error"):
+                                st.code(error_text, language='text')
+                        else:
+                            st.code(error_text, language='text')
+                    else:
+                        st.text("No error details available")
+            
+            st.markdown("### Manual Installation Required")
+            st.markdown("**Please run this command in your terminal/command prompt:**")
+            
+            # Show the most likely to work command
+            failed_packages_str = ' '.join([required_packages[pkg] for pkg in failed_packages])
+            primary_command = f"{sys.executable} -m pip install {failed_packages_str}"
+            
+            st.code(primary_command, language='bash')
+            
+            st.markdown("**Or try these alternatives:**")
+            alt_commands = [
+                f"pip install {failed_packages_str}",
+                f"python -m pip install {failed_packages_str}",
+                f"python3 -m pip install {failed_packages_str}"
+            ]
+            
+            for cmd in alt_commands:
+                st.code(cmd, language='bash')
+            
+            st.markdown("---")
+            st.markdown("**After installing:**")
+            st.info("💡 Refresh this page (press F5 or click the refresh button in your browser)")
+            
+            # Add retry button
+            if st.button("🔄 Retry Automatic Installation", type="primary"):
+                st.rerun()
+            
+            st.stop()
 
 # Check dependencies at startup (before other imports)
 check_and_install_dependencies()
