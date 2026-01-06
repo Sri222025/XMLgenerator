@@ -52,14 +52,14 @@ streamlit run idu_xml_generator_app.py
 
 ### Input Data Format
 
-Your input file (CSV or Excel) must have these columns:
+Your input file (CSV, Excel, or Excel Macro-Enabled) must have these columns:
 - **Device Model**: Device model name (e.g., JIDU6601)
 - **Serial Number**: Serial number of the device
 - **Version**: Firmware version (e.g., R2.0.19)
 
 ### Processing Steps
 
-1. **Upload Data**: Upload a CSV or Excel file, or paste CSV data directly
+1. **Upload Data**: Upload a CSV, Excel (.xlsx, .xls), or Excel Macro-Enabled (.xlsm) file, or paste CSV data directly
 2. **Generate**: Click "Generate Chunks & XML Files" button
 3. **Download**: Download individual XML files or all files as a ZIP archive
 
