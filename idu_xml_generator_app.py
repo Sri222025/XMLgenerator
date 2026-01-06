@@ -1,11 +1,55 @@
 """
 IDU Device Data Processor & XML Generator
 Combines chunk generation (IDU model filtering) and XML generation in one app
+Automatically installs missing dependencies
 """
 
+import subprocess
+import sys
 import streamlit as st
-import pandas as pd
 import os
+
+# Auto-install missing dependencies
+def install_package(package):
+    """Install a package using pip"""
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", package, "--quiet"])
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+def check_and_install_dependencies():
+    """Check for required dependencies and install if missing"""
+    required_packages = {
+        'pandas': 'pandas>=2.0.0',
+        'openpyxl': 'openpyxl>=3.1.0',
+        'xlrd': 'xlrd>=2.0.0'
+    }
+    
+    missing_packages = []
+    
+    for package, install_name in required_packages.items():
+        try:
+            __import__(package)
+        except ImportError:
+            missing_packages.append(install_name)
+    
+    if missing_packages:
+        with st.spinner(f"Installing missing dependencies: {', '.join([p.split('>=')[0] for p in missing_packages])}..."):
+            for package in missing_packages:
+                package_name = package.split('>=')[0]
+                if install_package(package):
+                    st.success(f"✅ Installed {package_name}")
+                else:
+                    st.error(f"❌ Failed to install {package_name}")
+                    st.stop()
+        st.rerun()
+
+# Check dependencies at startup (before other imports)
+check_and_install_dependencies()
+
+# Now import the rest
+import pandas as pd
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
 from pathlib import Path
@@ -13,29 +57,6 @@ import zipfile
 import tempfile
 import shutil
 from typing import List, Dict, Tuple
-
-# Check for required dependencies
-def check_dependencies():
-    """Check if required Excel reading dependencies are installed"""
-    missing_deps = []
-    
-    try:
-        import openpyxl
-    except ImportError:
-        missing_deps.append("openpyxl")
-    
-    try:
-        import xlrd
-    except ImportError:
-        missing_deps.append("xlrd")
-    
-    if missing_deps:
-        st.error(f"❌ Missing required dependencies: {', '.join(missing_deps)}")
-        st.info(f"💡 Please install them by running: `pip install {' '.join(missing_deps)}`")
-        st.info("Or install all requirements: `pip install -r requirements_idu_xml.txt`")
-        st.stop()
-    
-    return True
 
 # Page configuration
 st.set_page_config(
@@ -267,9 +288,6 @@ def create_zip_file(xml_files_dict: Dict[str, List[Tuple[str, str]]]) -> str:
     return zip_path
 
 
-# Check dependencies at startup
-check_dependencies()
-
 # Header
 st.title("📦 IDU XML Generator")
 st.markdown(
@@ -337,22 +355,6 @@ with tab1:
                 if uploaded_file.name.endswith('.csv'):
                     df = pd.read_csv(uploaded_file)
                 elif uploaded_file.name.endswith(('.xlsx', '.xls', '.xlsm')):
-                    # Check if openpyxl is needed for .xlsx/.xlsm files
-                    if uploaded_file.name.endswith(('.xlsx', '.xlsm')):
-                        try:
-                            import openpyxl
-                        except ImportError:
-                            st.error("❌ Missing dependency 'openpyxl'. Please install it: `pip install openpyxl`")
-                            st.stop()
-                    
-                    # Check if xlrd is needed for .xls files
-                    if uploaded_file.name.endswith('.xls'):
-                        try:
-                            import xlrd
-                        except ImportError:
-                            st.error("❌ Missing dependency 'xlrd'. Please install it: `pip install xlrd`")
-                            st.stop()
-                    
                     df = pd.read_excel(uploaded_file)
                 
                 st.success(f"✅ File uploaded: {uploaded_file.name} ({len(df)} rows)")
@@ -362,20 +364,10 @@ with tab1:
                     st.dataframe(df.head(20), use_container_width=True)
                     st.info(f"Total rows: {len(df)}")
                 
-            except ImportError as e:
-                error_msg = str(e)
-                if 'openpyxl' in error_msg:
-                    st.error("❌ Missing dependency 'openpyxl'. Please install it: `pip install openpyxl`")
-                    st.info("💡 Or install all requirements: `pip install -r requirements_idu_xml.txt`")
-                elif 'xlrd' in error_msg:
-                    st.error("❌ Missing dependency 'xlrd'. Please install it: `pip install xlrd`")
-                    st.info("💡 Or install all requirements: `pip install -r requirements_idu_xml.txt`")
-                else:
-                    st.error(f"❌ Missing dependency: {error_msg}")
             except Exception as e:
                 st.error(f"❌ Error reading file: {str(e)}")
                 if "openpyxl" in str(e).lower() or "xlrd" in str(e).lower():
-                    st.info("💡 Make sure you have installed: `pip install openpyxl xlrd`")
+                    st.info("💡 Dependencies are being installed automatically. Please refresh the page.")
     
     else:  # Paste CSV
         csv_text = st.text_area(
