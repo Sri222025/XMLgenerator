@@ -302,15 +302,15 @@ with tab1:
     if input_method == "Upload File":
         uploaded_file = st.file_uploader(
             "Upload a CSV or Excel file",
-            type=['csv', 'xlsx', 'xls'],
-            help="File should have columns: Device Model, Serial Number, Version"
+            type=['csv', 'xlsx', 'xls', 'xlsm'],
+            help="File should have columns: Device Model, Serial Number, Version. Supports CSV, XLSX, XLS, and XLSM formats."
         )
         
         if uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith('.csv'):
                     df = pd.read_csv(uploaded_file)
-                else:
+                elif uploaded_file.name.endswith(('.xlsx', '.xls', '.xlsm')):
                     df = pd.read_excel(uploaded_file)
                 
                 st.success(f"✅ File uploaded: {uploaded_file.name} ({len(df)} rows)")
