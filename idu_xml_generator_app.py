@@ -1,7 +1,6 @@
 """
 IDU Device Data Processor & XML Generator
 Combines chunk generation (IDU model filtering) and XML generation in one app
-Automatically installs missing dependencies when needed
 """
 
 import subprocess
@@ -10,64 +9,56 @@ import streamlit as st
 import os
 import importlib
 
-# Auto-install missing dependencies - non-blocking approach
-def install_package_silent(package):
-    """Install a package silently, trying multiple methods"""
-    methods = [
-        [sys.executable, "-m", "pip", "install", package, "--quiet", "--user"],
-        [sys.executable, "-m", "pip", "install", package, "--quiet"],
-        [sys.executable, "-m", "pip", "install", "--upgrade", package, "--quiet"],
-    ]
-    
-    for method in methods:
-        try:
-            result = subprocess.run(
-                method,
-                capture_output=True,
-                text=True,
-                timeout=60,
-                check=False
-            )
-            if result.returncode == 0:
-                return True
-        except:
-            continue
-    return False
-
-def ensure_package(package_name, install_name=None):
-    """Ensure a package is installed, install if missing"""
+# Simple dependency check and install
+def check_and_install_package(package_name, install_name=None):
+    """Check if package exists, try to install if missing"""
     if install_name is None:
         install_name = package_name
     
+    # Try to import
     try:
         importlib.import_module(package_name)
         return True
     except ImportError:
         # Try to install
-        if install_package_silent(install_name):
-            # Reload the module
-            try:
-                importlib.import_module(package_name)
-                return True
-            except:
+        st.info(f"📦 Installing {package_name}...")
+        try:
+            # Use the most reliable method
+            cmd = [sys.executable, "-m", "pip", "install", install_name, "--user"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0:
+                # Try importing again
+                try:
+                    importlib.import_module(package_name)
+                    st.success(f"✅ {package_name} installed successfully!")
+                    return True
+                except:
+                    st.warning(f"⚠️ {package_name} installed but import failed. Please refresh page.")
+                    return False
+            else:
+                # Installation failed - show helpful message
+                st.error(f"❌ Could not install {package_name} automatically")
+                st.markdown("**Please run this command in your terminal:**")
+                python_exe = sys.executable if sys.executable else "python"
+                st.code(f"{python_exe} -m pip install {install_name}", language='bash')
+                st.info("💡 After running the command, refresh this page (F5)")
                 return False
-        return False
+        except Exception as e:
+            st.error(f"❌ Installation error: {str(e)}")
+            st.markdown("**Please run this command in your terminal:**")
+            python_exe = sys.executable if sys.executable else "python"
+            st.code(f"{python_exe} -m pip install {install_name}", language='bash')
+            return False
 
-# Install critical dependencies silently at startup
-if 'deps_checked' not in st.session_state:
-    with st.spinner("🔧 Setting up environment..."):
-        # Install pandas first (required for everything)
-        if not ensure_package('pandas', 'pandas>=2.0.0'):
-            st.error("❌ Failed to install pandas. Please install manually: pip install pandas")
-            st.stop()
-        
-        # Install Excel readers (only needed for Excel files)
-        ensure_package('openpyxl', 'openpyxl>=3.1.0')
-        ensure_package('xlrd', 'xlrd>=2.0.0')
-    
-    st.session_state.deps_checked = True
+# Check critical dependencies at startup
+if 'deps_initialized' not in st.session_state:
+    # Check pandas (required)
+    if not check_and_install_package('pandas', 'pandas>=2.0.0'):
+        st.stop()
+    st.session_state.deps_initialized = True
 
-# Now import the rest
+# Import pandas now that it's available
 import pandas as pd
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
@@ -374,32 +365,14 @@ with tab1:
                 if uploaded_file.name.endswith('.csv'):
                     df = pd.read_csv(uploaded_file)
                 elif uploaded_file.name.endswith(('.xlsx', '.xls', '.xlsm')):
-                    # Install Excel dependencies on-demand if needed
+                    # Check and install Excel dependencies on-demand
                     if uploaded_file.name.endswith(('.xlsx', '.xlsm')):
-                        try:
-                            import openpyxl
-                        except ImportError:
-                            with st.spinner("Installing openpyxl for Excel support..."):
-                                if install_package_silent('openpyxl>=3.1.0'):
-                                    importlib.reload(sys.modules.get('openpyxl', None))
-                                    st.success("✅ openpyxl installed successfully")
-                                else:
-                                    st.error("❌ Failed to install openpyxl automatically")
-                                    st.info("Please install manually: `pip install openpyxl`")
-                                    st.stop()
+                        if not check_and_install_package('openpyxl', 'openpyxl>=3.1.0'):
+                            st.stop()
                     
                     if uploaded_file.name.endswith('.xls'):
-                        try:
-                            import xlrd
-                        except ImportError:
-                            with st.spinner("Installing xlrd for Excel support..."):
-                                if install_package_silent('xlrd>=2.0.0'):
-                                    importlib.reload(sys.modules.get('xlrd', None))
-                                    st.success("✅ xlrd installed successfully")
-                                else:
-                                    st.error("❌ Failed to install xlrd automatically")
-                                    st.info("Please install manually: `pip install xlrd`")
-                                    st.stop()
+                        if not check_and_install_package('xlrd', 'xlrd>=2.0.0'):
+                            st.stop()
                     
                     df = pd.read_excel(uploaded_file)
                 
@@ -412,25 +385,20 @@ with tab1:
                 
             except Exception as e:
                 error_msg = str(e)
-                # Try auto-install if it's a dependency error
+                st.error(f"❌ Error reading file: {error_msg}")
+                
+                # Try to auto-install if it's a dependency error
                 if "openpyxl" in error_msg.lower() and uploaded_file.name.endswith(('.xlsx', '.xlsm')):
-                    with st.spinner("Installing openpyxl..."):
-                        if install_package_silent('openpyxl>=3.1.0'):
-                            st.success("✅ openpyxl installed. Please try uploading again.")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Error: {error_msg}")
-                            st.info("💡 Please install manually: `pip install openpyxl`")
-                elif "xlrd" in error_msg.lower() and uploaded_file.name.endswith('.xls'):
-                    with st.spinner("Installing xlrd..."):
-                        if install_package_silent('xlrd>=2.0.0'):
-                            st.success("✅ xlrd installed. Please try uploading again.")
-                            st.rerun()
-                        else:
-                            st.error(f"❌ Error: {error_msg}")
-                            st.info("💡 Please install manually: `pip install xlrd`")
-                else:
-                    st.error(f"❌ Error reading file: {error_msg}")
+                    if check_and_install_package('openpyxl', 'openpyxl>=3.1.0'):
+                        st.info("✅ Please try uploading the file again")
+                    else:
+                        st.stop()
+                
+                if "xlrd" in error_msg.lower() and uploaded_file.name.endswith('.xls'):
+                    if check_and_install_package('xlrd', 'xlrd>=2.0.0'):
+                        st.info("✅ Please try uploading the file again")
+                    else:
+                        st.stop()
     
     else:  # Paste CSV
         csv_text = st.text_area(
@@ -620,4 +588,3 @@ st.markdown(
     "IDU Device Data Processor • Chunk Generation • XML Export</p>",
     unsafe_allow_html=True
 )
-
