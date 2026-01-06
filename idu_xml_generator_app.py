@@ -3,53 +3,11 @@ IDU Device Data Processor & XML Generator
 Combines chunk generation (IDU model filtering) and XML generation in one app
 """
 
-import subprocess
-import sys
 import streamlit as st
-import os
-import importlib
-
-# Simple dependency check and install
-def check_and_install_package(package_name, install_name=None):
-    """Check if package exists, try to install if missing"""
-    if install_name is None:
-        install_name = package_name
-    
-    # Try to import
-    try:
-        importlib.import_module(package_name)
-        return True
-    except ImportError:
-        # Show error message without attempting install in Streamlit Cloud
-        st.error(f"❌ Required package '{package_name}' is not installed")
-        st.markdown("### 📦 Installation Required")
-        st.markdown(f"""
-        The package **{package_name}** is required but not installed.
-        
-        **If running locally:**
-        ```bash
-        pip install {install_name}
-        ```
-        
-        **If deploying to Streamlit Cloud:**
-        Make sure `{install_name}` is listed in your `requirements.txt` file.
-        """)
-        return False
-
-# Check pandas at startup (required)
-if 'deps_checked' not in st.session_state:
-    if not check_and_install_package('pandas', 'pandas>=2.0.0'):
-        st.stop()
-    st.session_state.deps_checked = True
-
-# Import pandas now that it's available
 import pandas as pd
 import xml.etree.ElementTree as ET
 from xml.dom import minidom
-from pathlib import Path
 import zipfile
-import tempfile
-import shutil
 from typing import List, Dict, Tuple
 from io import StringIO, BytesIO
 
@@ -283,27 +241,71 @@ def create_zip_file(xml_files_dict: Dict[str, List[Tuple[str, str]]]) -> bytes:
     return zip_buffer.getvalue()
 
 
-def read_excel_file(file) -> pd.DataFrame:
-    """Read Excel file with proper error handling"""
-    try:
-        # Try openpyxl first (for .xlsx, .xlsm)
-        import openpyxl
-        return pd.read_excel(file, engine='openpyxl')
-    except ImportError:
-        st.error("❌ openpyxl is not installed. Cannot read Excel files.")
-        st.info("Please install it using: `pip install openpyxl`")
-        st.stop()
-    except Exception as e:
-        # Try xlrd for older .xls files
+def read_file_smart(uploaded_file) -> pd.DataFrame:
+    """
+    Smart file reader that handles CSV and Excel files automatically
+    Tries multiple methods to read the file
+    """
+    file_ext = uploaded_file.name.lower().split('.')[-1]
+    
+    # CSV files - straightforward
+    if file_ext == 'csv':
+        try:
+            return pd.read_csv(uploaded_file)
+        except Exception as e:
+            # Try with different encoding
+            try:
+                uploaded_file.seek(0)
+                return pd.read_csv(uploaded_file, encoding='latin-1')
+            except:
+                uploaded_file.seek(0)
+                return pd.read_csv(uploaded_file, encoding='iso-8859-1')
+    
+    # Excel files - try multiple engines
+    elif file_ext in ['xlsx', 'xlsm', 'xls']:
+        # Try openpyxl first (preferred for .xlsx)
+        try:
+            import openpyxl
+            uploaded_file.seek(0)
+            return pd.read_excel(uploaded_file, engine='openpyxl')
+        except ImportError:
+            pass
+        except Exception as e:
+            st.warning(f"openpyxl engine failed: {str(e)}")
+        
+        # Try xlrd (for older .xls files)
         try:
             import xlrd
-            return pd.read_excel(file, engine='xlrd')
+            uploaded_file.seek(0)
+            return pd.read_excel(uploaded_file, engine='xlrd')
         except ImportError:
-            st.error("❌ xlrd is not installed. Cannot read .xls files.")
-            st.info("Please install it using: `pip install xlrd`")
-            st.stop()
-        except Exception as e2:
-            raise Exception(f"Error reading Excel file: {str(e)}")
+            pass
+        except Exception as e:
+            st.warning(f"xlrd engine failed: {str(e)}")
+        
+        # Try default pandas engine (no engine specified)
+        try:
+            uploaded_file.seek(0)
+            return pd.read_excel(uploaded_file)
+        except Exception as e:
+            st.warning(f"Default pandas engine failed: {str(e)}")
+        
+        # Last resort: ask user to convert to CSV
+        st.error("❌ Unable to read Excel file with available libraries.")
+        st.warning("📝 **Please convert your Excel file to CSV format:**")
+        st.markdown("""
+        **In Excel:**
+        1. Open your file
+        2. Click `File` → `Save As`
+        3. Choose `CSV (Comma delimited) (*.csv)` as the file type
+        4. Upload the CSV file here
+        
+        **Or paste your data directly in the 'Paste CSV' tab!**
+        """)
+        st.stop()
+    
+    else:
+        raise ValueError(f"Unsupported file format: {file_ext}")
 
 
 # Header
@@ -344,6 +346,8 @@ with st.sidebar:
        - Version
     2. Click "Generate Chunks & XML Files"
     3. Download the generated XML files
+    
+    **💡 Tip:** If Excel upload fails, use CSV format or paste data directly!
     """)
 
 # Main content
@@ -352,10 +356,13 @@ tab1, tab2, tab3 = st.tabs(["📄 Input Data", "📊 Processing Results", "📥 
 with tab1:
     st.header("Upload or Paste Data")
     
+    # Important notice
+    st.info("💡 **Recommended:** Use CSV format or paste data directly for best compatibility!")
+    
     # Input method selection
     input_method = st.radio(
         "Choose input method:",
-        ["Upload File", "Paste CSV"],
+        ["Paste CSV (Recommended)", "Upload File"],
         horizontal=True
     )
     
@@ -365,16 +372,13 @@ with tab1:
         uploaded_file = st.file_uploader(
             "Upload a CSV or Excel file",
             type=['csv', 'xlsx', 'xls', 'xlsm'],
-            help="File should have columns: Device Model, Serial Number, Version"
+            help="CSV format recommended. If Excel fails, please convert to CSV first."
         )
         
         if uploaded_file is not None:
             try:
-                if uploaded_file.name.endswith('.csv'):
-                    df = pd.read_csv(uploaded_file)
-                else:
-                    # Excel file
-                    df = read_excel_file(uploaded_file)
+                with st.spinner("📖 Reading file..."):
+                    df = read_file_smart(uploaded_file)
                 
                 st.success(f"✅ File uploaded: {uploaded_file.name} ({len(df)} rows)")
                 
@@ -385,24 +389,41 @@ with tab1:
                 
             except Exception as e:
                 st.error(f"❌ Error reading file: {str(e)}")
+                st.info("💡 Try converting your file to CSV format or use the 'Paste CSV' option!")
     
-    else:  # Paste CSV
+    else:  # Paste CSV (Recommended)
+        st.markdown("**📋 Copy data from Excel and paste here:**")
+        st.markdown("""
+        1. Select your data in Excel (including headers)
+        2. Copy (Ctrl+C / Cmd+C)
+        3. Paste below (Ctrl+V / Cmd+V)
+        """)
+        
         csv_text = st.text_area(
-            "Paste CSV data here (include header row):",
-            height=300,
-            placeholder="Device Model,Serial Number,Version\nJIDU6601,SN123456,R2.0.19\n..."
+            "Paste your data here:",
+            height=400,
+            placeholder="Device Model,Serial Number,Version\nJIDU6601,SN123456,R2.0.19\nJIDU6611,SN789012,R2.0.18\n...",
+            help="Paste data copied from Excel or any spreadsheet"
         )
         
         if csv_text:
             try:
+                # Try comma separator first
                 df = pd.read_csv(StringIO(csv_text))
-                st.success(f"✅ CSV parsed: {len(df)} rows")
+                
+                # If only one column detected, try tab separator (Excel default)
+                if len(df.columns) == 1:
+                    df = pd.read_csv(StringIO(csv_text), sep='\t')
+                
+                st.success(f"✅ Data parsed: {len(df)} rows, {len(df.columns)} columns")
                 
                 with st.expander("📄 Preview pasted data"):
                     st.dataframe(df.head(20), use_container_width=True)
+                    st.info(f"Total rows: {len(df)} | Columns: {', '.join(df.columns)}")
                     
             except Exception as e:
-                st.error(f"❌ Error parsing CSV: {str(e)}")
+                st.error(f"❌ Error parsing data: {str(e)}")
+                st.info("💡 Make sure your data includes column headers in the first row!")
     
     # Process button
     if df is not None:
@@ -426,15 +447,19 @@ with tab1:
                         # Process data
                         xml_files_dict = process_data_to_xml(df)
                         
-                        # Store in session state
-                        st.session_state.xml_files = xml_files_dict
-                        st.session_state.processing_complete = True
-                        
-                        # Count total files
-                        total_files = sum(len(files) for files in xml_files_dict.values())
-                        
-                        st.success(f"✅ Processing complete! Generated {total_files} XML files.")
-                        st.rerun()
+                        if not xml_files_dict:
+                            st.warning("⚠️ No valid data found matching the criteria (device models and versions).")
+                            st.info("Please check that your data contains valid Device Models and Versions.")
+                        else:
+                            # Store in session state
+                            st.session_state.xml_files = xml_files_dict
+                            st.session_state.processing_complete = True
+                            
+                            # Count total files
+                            total_files = sum(len(files) for files in xml_files_dict.values())
+                            
+                            st.success(f"✅ Processing complete! Generated {total_files} XML files.")
+                            st.rerun()
                         
                     except Exception as e:
                         st.error(f"❌ Error during processing: {str(e)}")
