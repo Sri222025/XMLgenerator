@@ -20,43 +20,27 @@ def check_and_install_package(package_name, install_name=None):
         importlib.import_module(package_name)
         return True
     except ImportError:
-        # Try to install
-        st.info(f"📦 Installing {package_name}...")
-        try:
-            # Use the most reliable method
-            cmd = [sys.executable, "-m", "pip", "install", install_name, "--user"]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
-            
-            if result.returncode == 0:
-                # Try importing again
-                try:
-                    importlib.import_module(package_name)
-                    st.success(f"✅ {package_name} installed successfully!")
-                    return True
-                except:
-                    st.warning(f"⚠️ {package_name} installed but import failed. Please refresh page.")
-                    return False
-            else:
-                # Installation failed - show helpful message
-                st.error(f"❌ Could not install {package_name} automatically")
-                st.markdown("**Please run this command in your terminal:**")
-                python_exe = sys.executable if sys.executable else "python"
-                st.code(f"{python_exe} -m pip install {install_name}", language='bash')
-                st.info("💡 After running the command, refresh this page (F5)")
-                return False
-        except Exception as e:
-            st.error(f"❌ Installation error: {str(e)}")
-            st.markdown("**Please run this command in your terminal:**")
-            python_exe = sys.executable if sys.executable else "python"
-            st.code(f"{python_exe} -m pip install {install_name}", language='bash')
-            return False
+        # Show error message without attempting install in Streamlit Cloud
+        st.error(f"❌ Required package '{package_name}' is not installed")
+        st.markdown("### 📦 Installation Required")
+        st.markdown(f"""
+        The package **{package_name}** is required but not installed.
+        
+        **If running locally:**
+        ```bash
+        pip install {install_name}
+        ```
+        
+        **If deploying to Streamlit Cloud:**
+        Make sure `{install_name}` is listed in your `requirements.txt` file.
+        """)
+        return False
 
-# Check critical dependencies at startup
-if 'deps_initialized' not in st.session_state:
-    # Check pandas (required)
+# Check pandas at startup (required)
+if 'deps_checked' not in st.session_state:
     if not check_and_install_package('pandas', 'pandas>=2.0.0'):
         st.stop()
-    st.session_state.deps_initialized = True
+    st.session_state.deps_checked = True
 
 # Import pandas now that it's available
 import pandas as pd
@@ -67,6 +51,7 @@ import zipfile
 import tempfile
 import shutil
 from typing import List, Dict, Tuple
+from io import StringIO, BytesIO
 
 # Page configuration
 st.set_page_config(
@@ -285,17 +270,40 @@ def process_data_to_xml(df: pd.DataFrame) -> Dict[str, List[Tuple[str, str]]]:
     return all_xml_files
 
 
-def create_zip_file(xml_files_dict: Dict[str, List[Tuple[str, str]]]) -> str:
-    """Create a ZIP file containing all XML files"""
-    temp_dir = tempfile.mkdtemp()
-    zip_path = os.path.join(temp_dir, "xml_files.zip")
+def create_zip_file(xml_files_dict: Dict[str, List[Tuple[str, str]]]) -> bytes:
+    """Create a ZIP file containing all XML files and return as bytes"""
+    zip_buffer = BytesIO()
     
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
         for device_model, files in xml_files_dict.items():
             for filename, xml_content in files:
                 zipf.writestr(filename, xml_content)
     
-    return zip_path
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
+
+
+def read_excel_file(file) -> pd.DataFrame:
+    """Read Excel file with proper error handling"""
+    try:
+        # Try openpyxl first (for .xlsx, .xlsm)
+        import openpyxl
+        return pd.read_excel(file, engine='openpyxl')
+    except ImportError:
+        st.error("❌ openpyxl is not installed. Cannot read Excel files.")
+        st.info("Please install it using: `pip install openpyxl`")
+        st.stop()
+    except Exception as e:
+        # Try xlrd for older .xls files
+        try:
+            import xlrd
+            return pd.read_excel(file, engine='xlrd')
+        except ImportError:
+            st.error("❌ xlrd is not installed. Cannot read .xls files.")
+            st.info("Please install it using: `pip install xlrd`")
+            st.stop()
+        except Exception as e2:
+            raise Exception(f"Error reading Excel file: {str(e)}")
 
 
 # Header
@@ -357,24 +365,16 @@ with tab1:
         uploaded_file = st.file_uploader(
             "Upload a CSV or Excel file",
             type=['csv', 'xlsx', 'xls', 'xlsm'],
-            help="File should have columns: Device Model, Serial Number, Version. Supports CSV, XLSX, XLS, and XLSM formats."
+            help="File should have columns: Device Model, Serial Number, Version"
         )
         
         if uploaded_file is not None:
             try:
                 if uploaded_file.name.endswith('.csv'):
                     df = pd.read_csv(uploaded_file)
-                elif uploaded_file.name.endswith(('.xlsx', '.xls', '.xlsm')):
-                    # Check and install Excel dependencies on-demand
-                    if uploaded_file.name.endswith(('.xlsx', '.xlsm')):
-                        if not check_and_install_package('openpyxl', 'openpyxl>=3.1.0'):
-                            st.stop()
-                    
-                    if uploaded_file.name.endswith('.xls'):
-                        if not check_and_install_package('xlrd', 'xlrd>=2.0.0'):
-                            st.stop()
-                    
-                    df = pd.read_excel(uploaded_file)
+                else:
+                    # Excel file
+                    df = read_excel_file(uploaded_file)
                 
                 st.success(f"✅ File uploaded: {uploaded_file.name} ({len(df)} rows)")
                 
@@ -384,21 +384,7 @@ with tab1:
                     st.info(f"Total rows: {len(df)}")
                 
             except Exception as e:
-                error_msg = str(e)
-                st.error(f"❌ Error reading file: {error_msg}")
-                
-                # Try to auto-install if it's a dependency error
-                if "openpyxl" in error_msg.lower() and uploaded_file.name.endswith(('.xlsx', '.xlsm')):
-                    if check_and_install_package('openpyxl', 'openpyxl>=3.1.0'):
-                        st.info("✅ Please try uploading the file again")
-                    else:
-                        st.stop()
-                
-                if "xlrd" in error_msg.lower() and uploaded_file.name.endswith('.xls'):
-                    if check_and_install_package('xlrd', 'xlrd>=2.0.0'):
-                        st.info("✅ Please try uploading the file again")
-                    else:
-                        st.stop()
+                st.error(f"❌ Error reading file: {str(e)}")
     
     else:  # Paste CSV
         csv_text = st.text_area(
@@ -409,7 +395,6 @@ with tab1:
         
         if csv_text:
             try:
-                from io import StringIO
                 df = pd.read_csv(StringIO(csv_text))
                 st.success(f"✅ CSV parsed: {len(df)} rows")
                 
@@ -447,12 +432,8 @@ with tab1:
                         
                         # Count total files
                         total_files = sum(len(files) for files in xml_files_dict.values())
-                        total_chunks = sum(len(chunks) for chunks in [
-                            create_chunks(df, model, ALLOWED_VERSIONS, CHUNK_SIZE)
-                            for model in DEVICE_MODELS
-                        ])
                         
-                        st.success(f"✅ Processing complete! Generated {total_files} XML files from {total_chunks} chunks.")
+                        st.success(f"✅ Processing complete! Generated {total_files} XML files.")
                         st.rerun()
                         
                     except Exception as e:
@@ -542,18 +523,18 @@ with tab3:
         # Download all as ZIP
         st.subheader("📦 Download All XML Files (ZIP)")
         
-        zip_path = create_zip_file(xml_files_dict)
-        
-        with open(zip_path, 'rb') as f:
-            zip_bytes = f.read()
-        
-        st.download_button(
-            label="⬇️ Download All XML Files (ZIP)",
-            data=zip_bytes,
-            file_name="xml_files.zip",
-            mime="application/zip",
-            use_container_width=True
-        )
+        try:
+            zip_bytes = create_zip_file(xml_files_dict)
+            
+            st.download_button(
+                label="⬇️ Download All XML Files (ZIP)",
+                data=zip_bytes,
+                file_name="xml_files.zip",
+                mime="application/zip",
+                use_container_width=True
+            )
+        except Exception as e:
+            st.error(f"Error creating ZIP file: {str(e)}")
         
         st.divider()
         
