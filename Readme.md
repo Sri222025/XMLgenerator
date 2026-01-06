@@ -1,13 +1,15 @@
-# IDU XML Generator App
+# IDU XML Generator
 
-A Python application that combines chunk generation (based on IDU model filtering) and XML file generation in one click.
+A Python application that combines chunk generation (based on IDU model filtering) and XML file generation in one click. The app automatically installs missing dependencies.
 
 ## Features
 
+- **Automatic Dependency Installation**: Installs required packages automatically if missing
 - **Chunk Generation**: Automatically filters device data by IDU models and allowed versions, creating chunks of 25,000 rows each
 - **XML Generation**: Converts chunks into properly formatted XML files with manufacturer mapping
 - **One-Click Processing**: Upload data and generate all XML files with a single button click
 - **Batch Download**: Download all XML files as a ZIP archive or individual files
+- **Multiple File Formats**: Supports CSV, XLSX, XLS, and XLSM formats
 
 ## Supported Device Models
 
@@ -28,42 +30,62 @@ A Python application that combines chunk generation (based on IDU model filterin
 - R2.0.16
 - R2.0.19.6
 
-## Installation
+## Installation & Usage
 
-1. Install Python 3.8 or higher
-2. Install required packages:
+### Quick Start
+
+1. **Install Python 3.8 or higher** (if not already installed)
+
+2. **Run the app:**
    ```bash
-   pip install -r requirements_idu_xml.txt
+   streamlit run main.py
    ```
 
-## Usage
+   The app will automatically:
+   - Check for required dependencies
+   - Install any missing packages (pandas, openpyxl, xlrd)
+   - Launch in your web browser (default: http://localhost:8501)
 
-### Running the App
+### Manual Installation (Optional)
 
-**Option 1: Using the batch file (Windows)**
+If you prefer to install dependencies manually:
 ```bash
-run_idu_xml_generator.bat
+pip install -r requirements.txt
 ```
 
-**Option 2: Using command line**
-```bash
-streamlit run idu_xml_generator_app.py
-```
-
-### Input Data Format
+## Input Data Format
 
 Your input file (CSV, Excel, or Excel Macro-Enabled) must have these columns:
 - **Device Model**: Device model name (e.g., JIDU6601)
 - **Serial Number**: Serial number of the device
 - **Version**: Firmware version (e.g., R2.0.19)
 
-### Processing Steps
+### Example CSV:
+```csv
+Device Model,Serial Number,Version
+JIDU6601,SN001,R2.0.19
+JIDU6601,SN002,R2.0.19
+JIDU6401,SN003,R2.0.18
+```
 
-1. **Upload Data**: Upload a CSV, Excel (.xlsx, .xls), or Excel Macro-Enabled (.xlsm) file, or paste CSV data directly
-2. **Generate**: Click "Generate Chunks & XML Files" button
-3. **Download**: Download individual XML files or all files as a ZIP archive
+## How to Use
 
-### Output Format
+1. **Upload Data**: 
+   - Upload a CSV, XLSX, XLS, or XLSM file
+   - Or paste CSV data directly in the app
+
+2. **Generate**: 
+   - Click "Generate Chunks & XML Files" button
+   - The app will:
+     - Filter data by device models and allowed versions
+     - Create chunks of 25,000 rows per device model
+     - Generate XML files for each chunk
+
+3. **Download**: 
+   - Download individual XML files
+   - Or download all files as a ZIP archive
+
+## Output Format
 
 Each XML file follows this structure:
 ```xml
@@ -92,23 +114,10 @@ Each XML file follows this structure:
 ## File Structure
 
 ```
-├── idu_xml_generator_app.py      # Main application file
-├── requirements_idu_xml.txt      # Python dependencies
-├── README_IDU_XML_GENERATOR.md   # This file
-└── run_idu_xml_generator.bat     # Windows batch file to run the app
+├── main.py              # Main application (handles everything)
+├── requirements.txt     # Python dependencies
+└── README.md           # This file
 ```
-
-## Example
-
-Input CSV:
-```csv
-Device Model,Serial Number,Version
-JIDU6601,SN001,R2.0.19
-JIDU6601,SN002,R2.0.19
-JIDU6401,SN003,R2.0.18
-```
-
-Output: XML files named `JIDU6601_Chunk1.xml`, `JIDU6401_Chunk1.xml`, etc.
 
 ## Notes
 
@@ -116,4 +125,17 @@ Output: XML files named `JIDU6601_Chunk1.xml`, `JIDU6401_Chunk1.xml`, etc.
 - Only data matching the allowed versions and device models is processed
 - Empty serial numbers are automatically skipped
 - The app runs in your web browser (default: http://localhost:8501)
+- Dependencies are installed automatically on first run
 
+## Troubleshooting
+
+If you encounter any issues:
+
+1. **Dependencies not installing**: Make sure you have internet connection and pip is working
+2. **File upload errors**: Check that your file has the correct columns (Device Model, Serial Number, Version)
+3. **Python not found**: Make sure Python 3.8+ is installed and added to your PATH
+
+## Requirements
+
+- Python 3.8 or higher
+- Internet connection (for automatic dependency installation)
